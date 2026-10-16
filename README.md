@@ -2,7 +2,7 @@
 
 PR Radar is a Claude Code mod. It adds a pane that lists every open GitHub pull request tied to your account and sorts them into lanes by who must act next. Each card shows the review state, CI, open review threads, the Jira status and priority, the linked Claude sessions, and unfinished Agent Context runs. Its buttons start the next step.
 
-It runs in the Claude desktop app (Code tab), which loads mod panes and buttons. The classic terminal CLI cannot show the pane.
+It runs in Claude Code: the terminal CLI, the Code tab of the desktop app, and the VS Code extension. It does not run in claude.ai chat or Cowork, and `claude -p` or cloud sessions draw no pane.
 
 ## Install
 
@@ -57,6 +57,25 @@ A new conversation opens as a desktop session when the app offers one. Otherwise
 - **Optional:** an Atlassian (Jira) connector in the session. It adds the Jira status and priority, and lists the issues you have in progress. Without it, cards leave Jira out. An automatic refresh skips any connector call that would ask for a permission, so no dialog opens on its own; `/prs refresh` does ask.
 - **Optional:** the desktop app's session tools. They link cards to the Claude sessions working on them. Without them, cards leave sessions out.
 - **Optional:** an Agent Context checkout, a private workflow repository whose run records (`logs/**/runs/*.json`) note unfinished agent work. PR Radar reads them to list that work. Without one, that section stays empty.
+
+## What it does on your machine
+
+A mod runs with your own permissions and is not sandboxed. PR Radar is read-only except for the buttons you press. Everything it does is listed here.
+
+Processes it starts:
+- `gh api graphql`, `gh api user` and `gh api rate_limit`, to list your pull requests and read your GraphQL budget;
+- `gh pr ready` (with `--undo` for Back to draft), only when you press **Mark ready** or **Back to draft**;
+- `git -C <folder> remote get-url origin`, to match the Claude sessions to their repositories;
+- `python -I scripts/runs.py` and `python -I scripts/checkouts.py`, the two read-only scripts in this repository;
+- a PowerShell command in a new Terminal tab, only when you start a conversation and the desktop app offers no session tool.
+
+Files it reads:
+- the run records under `<agentContextPath>/logs/**/runs/*.json`;
+- the `.git/config` of the folders one level below your home folder and its `Documents`, `Documents/GitHub`, `source/repos` and `repos` folders, to find each repository's local checkout.
+
+Network calls: only GitHub through `gh`, and Jira through the Atlassian connector of your session when you have one. It sends no data anywhere else, and stores its snapshot, marks and lease in the plugin's own store.
+
+Tools of the session it calls: the Atlassian connector's JQL search and site list, and the desktop app's session list, start-session, send-message and Terminal tools. A call that would ask for a permission runs only when you refresh with `/prs refresh` or press **Authorize**.
 
 ## Options
 
