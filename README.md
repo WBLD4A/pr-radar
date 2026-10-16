@@ -56,7 +56,7 @@ A new conversation opens as a desktop session when the app offers one. Otherwise
 - **Required:** `python` on `PATH`. The scripts in [`scripts/`](scripts/) find your local checkouts and read run records.
 - **Optional:** an Atlassian (Jira) connector in the session. It adds the Jira status and priority, and lists the issues you have in progress. Without it, cards leave Jira out. An automatic refresh skips any connector call that would ask for a permission, so no dialog opens on its own; `/prs refresh` does ask.
 - **Optional:** the desktop app's session tools. They link cards to the Claude sessions working on them. Without them, cards leave sessions out.
-- **Optional:** an [Agent Context](https://github.com/WBLD4A/agent-context) checkout. PR Radar reads its run records to show unfinished work. Without a checkout, that section stays empty.
+- **Optional:** an Agent Context checkout, a private workflow repository whose run records (`logs/**/runs/*.json`) note unfinished agent work. PR Radar reads them to list that work. Without one, that section stays empty.
 
 ## Options
 
