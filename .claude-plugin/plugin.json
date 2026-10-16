@@ -1,0 +1,32 @@
+{
+  "name": "pr-radar",
+  "version": "0.3.6",
+  "description": "PR Radar pane: every GitHub PR tied to your account, sorted by who must act (blocked, your turn, ready, waiting, draft), with the Jira status and priority, CI, review threads, Claude sessions and unfinished Agent Context work.",
+  "author": {
+    "name": "WBLD4A"
+  },
+  "homepage": "https://github.com/WBLD4A/pr-radar",
+  "repository": "https://github.com/WBLD4A/pr-radar",
+  "license": "MIT",
+  "keywords": [
+    "github",
+    "pull-requests",
+    "code-review",
+    "jira"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "agentContextPath": {
+      "type": "string",
+      "title": "Agent Context checkout",
+      "description": "Folder of the Agent Context checkout whose run records are read. Empty: ~/agent-context.",
+      "default": ""
+    },
+    "refreshMinutes": {
+      "type": "number",
+      "title": "Refresh interval (minutes)",
+      "description": "Minutes between two automatic refreshes, shared by the sessions.",
+      "default": 5
+    }
+  }
+}

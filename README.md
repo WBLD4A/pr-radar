@@ -1,0 +1,96 @@
+# PR Radar
+
+PR Radar is a Claude Code mod. It adds a pane that lists every open GitHub pull request tied to your account and sorts them into lanes by who must act next. Each card shows the review state, CI, open review threads, the Jira status and priority, the linked Claude sessions, and unfinished Agent Context runs. Its buttons start the next step.
+
+It runs in the Claude desktop app (Code tab), which loads mod panes and buttons. The classic terminal CLI cannot show the pane.
+
+## Install
+
+```text
+/plugin marketplace add WBLD4A/pr-radar
+/plugin install pr-radar@pr-radar
+```
+
+Or from a shell:
+
+```bash
+claude plugin marketplace add WBLD4A/pr-radar
+claude plugin install pr-radar@pr-radar
+```
+
+Then run `/reload-plugins` in open sessions.
+
+## Use
+
+The pane opens on its own at the start of every session, without taking focus. `/prs` reopens it, and `/prs refresh` refreshes it right away. While the pane is closed, a button above the prompt reopens it. The model reads the same data through the mod's `snapshot` tool, so you can ask it things like "what should I do next?".
+
+The pane has seven lanes, in this order:
+
+1. **Blocked**
+2. **Your turn**
+3. **In progress**
+4. **Ready for manual review**
+5. **Waiting on others**
+6. **Drafts**
+7. **On hold**
+
+Inside a lane, cards are sorted by Jira priority, then by most recent update. A Jira status that means blocked or on hold moves the pull request to that lane. Below the lanes, the pane lists the Jira issues assigned to you that are in progress but have no pull request yet.
+
+What a card's buttons do:
+
+- start the pull request's next step in a new conversation;
+- mark the pull request as in progress;
+- continue unfinished work;
+- copy the pull request's URL.
+
+On your own pull requests, **Mark ready** marks a draft ready for review, and **Back to draft** turns a pull request in the Ready for manual review lane back into a draft. Both run `gh pr ready`. A mark lasts until the pull request next changes on GitHub.
+
+A new conversation opens as a desktop session when the app offers one. Otherwise it opens in a new Terminal tab with a PowerShell command, a fallback that works only on Windows. If neither is possible, the prompt goes into the composer.
+
+## Requirements
+
+- **Required:** the [`gh` CLI](https://cli.github.com/), signed in. PR Radar lists your pull requests through `gh api graphql`, which costs a few points of your account's hourly GraphQL budget per refresh.
+  - When the budget runs low, automatic refreshes wait for it to reset.
+  - When the budget is spent, every refresh waits.
+  - Meanwhile the pane keeps the last pull requests it got and says when it will ask again.
+- **Required:** `python` on `PATH`. The scripts in [`scripts/`](scripts/) find your local checkouts and read run records.
+- **Optional:** an Atlassian (Jira) connector in the session. It adds the Jira status and priority, and lists the issues you have in progress. Without it, cards leave Jira out. An automatic refresh skips any connector call that would ask for a permission, so no dialog opens on its own; `/prs refresh` does ask.
+- **Optional:** the desktop app's session tools. They link cards to the Claude sessions working on them. Without them, cards leave sessions out.
+- **Optional:** an [Agent Context](https://github.com/WBLD4A/agent-context) checkout. PR Radar reads its run records to show unfinished work. Without a checkout, that section stays empty.
+
+## Options
+
+Set these in the plugin's config menu. Each option is one row there.
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `agentContextPath` | empty, meaning `~/agent-context` | The Agent Context checkout whose run records are read. |
+| `refreshMinutes` | `5` | The minutes between two automatic refreshes. Open sessions share one snapshot. |
+
+## Turn it off and on
+
+```bash
+claude plugin disable pr-radar@pr-radar
+```
+
+```bash
+claude plugin enable pr-radar@pr-radar
+```
+
+Then run `/reload-plugins` in open sessions.
+
+## Development
+
+The mod's entry point is [`hooks/register.tsx`](hooks/register.tsx), and its pure logic lives in [`hooks/model.ts`](hooks/model.ts). Run the tests and the manifest check with:
+
+```bash
+claude plugin test .
+```
+
+```bash
+claude plugin validate .
+```
+
+## License
+
+[MIT](LICENSE)

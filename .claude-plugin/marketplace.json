@@ -1,0 +1,14 @@
+{
+  "name": "pr-radar",
+  "owner": {
+    "name": "WBLD4A"
+  },
+  "description": "PR Radar, a Claude Code mod that sorts your GitHub pull requests by who must act.",
+  "plugins": [
+    {
+      "name": "pr-radar",
+      "source": "./",
+      "description": "PR Radar pane: every GitHub PR tied to your account, sorted by who must act (blocked, your turn, ready, waiting, draft), with the Jira status and priority, CI, review threads, Claude sessions and unfinished Agent Context work."
+    }
+  ]
+}
