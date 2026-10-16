@@ -77,6 +77,14 @@ Network calls: only GitHub through `gh`, and Jira through the Atlassian connecto
 
 Tools of the session it calls: the Atlassian connector's JQL search and site list, and the desktop app's session list, start-session, send-message and Terminal tools. A call that would ask for a permission runs only when you refresh with `/prs refresh` or press **Authorize**.
 
+### Notes for the directory review
+
+- **Tools the mod calls itself** (`callTool` in `hooks/register.tsx`): only the session tools named above, found by these fixed name suffixes: `__searchJiraIssuesUsingJql`, `__getAccessibleAtlassianResources`, `ccd_session_mgmt__list_sessions`, `__start_session`, `ccd_session_mgmt__send_message` and `terminal__run_in_terminal`. The Jira and session-list calls run on each refresh. The other three run only when you press a card's button to start or continue a conversation. The tool name comes from the session's tool list, which is why it is not written as fixed text; no server answer ever picks a tool or a command.
+- **The `gh api graphql` command** (`graphql` in `hooks/register.tsx`): the program and its flags are fixed text. The query is a constant built in `hooks/model.ts`, and its `$q1`…`$q4` variables are GitHub search strings made from your login (`author:<login>`, `review-requested:<login>`, and so on); the detail query takes only the pull request ids the first one returned. Only GitHub's answer is read; it is parsed as data and never run.
+- **Environment variables read**: `USERPROFILE` or `HOME`, to find your home folder, and `CLAUDE_CODE_EXECPATH`, to start `claude` in the Terminal fallback. The mod reads no token or key: `gh` uses its own sign-in, and nothing read from the environment is sent anywhere.
+- **Conversation data**: the mod's only `tool.call` hook is on its own `mcp__pr-radar__snapshot` tool. It answers that tool with the radar's summary in place of a server, as a mod-registered tool does. It does not see or change any other tool call, and sends no conversation text out.
+- **The `command.run` hook** handles only the mod's own `/prs` command: it opens the pane, and with `refresh` refreshes it.
+
 ## Options
 
 Set these in the plugin's config menu. Each option is one row there.
