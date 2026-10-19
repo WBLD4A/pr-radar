@@ -8,6 +8,7 @@
   "homepage": "https://github.com/WBLD4A/pr-radar",
   "repository": "https://github.com/WBLD4A/pr-radar",
   "license": "MIT",
+  "icon": "./.claude-plugin/icon.png",
   "keywords": [
     "github",
     "pull-requests",
