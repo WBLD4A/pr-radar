@@ -8,6 +8,7 @@
   "homepage": "https://github.com/WBLD4A/pr-radar",
   "repository": "https://github.com/WBLD4A/pr-radar",
   "license": "MIT",
+  "privacyPolicyUrl": "https://github.com/WBLD4A/pr-radar/blob/main/PRIVACY.md",
   "icon": "./.claude-plugin/icon.png",
   "keywords": [
     "github",

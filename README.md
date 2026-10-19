@@ -118,6 +118,10 @@ claude plugin test .
 claude plugin validate .
 ```
 
+## Privacy
+
+See the [privacy policy](PRIVACY.md).
+
 ## License
 
 [MIT](LICENSE)
