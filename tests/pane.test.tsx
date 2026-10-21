@@ -29,7 +29,7 @@ type Launched = { tool: string; input: Record<string, unknown> }
 
 type GitHub = { failure?: string; remaining?: number; resetAt?: string; resetEpoch?: number; queries: string[] }
 
-type Access = { asks: string[]; deny?: string; first: string[]; read: Launched[] }
+type Access = { asks: string[]; deny?: string; first: string[]; read: Launched[]; jiraAnswer?: string }
 
 const NOW = Date.parse('2026-10-13T12:00:00Z')
 
@@ -140,6 +140,7 @@ const host = (
     if (e.tool === JIRA_SITES) {
       return { result: '', text: JSON.stringify({ data: { resources: [{ cloudId: 'c1', url: 'https://acme.atlassian.net' }] } }) }
     }
+    if (e.tool === JIRA_SEARCH && access.jiraAnswer !== undefined) return { result: '', text: access.jiraAnswer }
     if (e.tool === JIRA_SEARCH) {
       const jql = String((e as { jql?: unknown }).jql)
       const issues = jql.startsWith('key in')
@@ -479,6 +480,18 @@ test('a refused Authorize says which source and why', async ($, on) => {
   expect(toasts.at(-1)).toBe('Still refused: Jira: The classifier blocked the call; Sessions: The classifier blocked the call')
   expect(await ui.find(text('Jira: permission needed'))).toBeDefined()
   await ui.unmount()
+})
+
+test('a Jira answer that cannot be read shows a message, not the parser error', async ($, on) => {
+  const { access } = host(on)
+  for (const answer of [JSON.stringify({ issues: {} }), 'not json']) {
+    access.jiraAnswer = answer
+    await $.command.run(REFRESH)
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    expect(await ui.find(text("⚠ Jira: the Atlassian connector's answer could not be read"))).toBeDefined()
+    expect(await ui.find(text(/not a function|holds no list|JSON/))).toBeUndefined()
+    await ui.unmount()
+  }
 })
 
 test('of two Jira servers, the one the permission rules allow is read', async ($, on) => {

@@ -143,6 +143,26 @@ describe('Jira, sessions and ordering', () => {
     expect(sortPrs([low, high], jira).map(row => row.number)).toEqual([2, 1])
   })
 
+  test('Jira issues are read from every answer shape of the connector', () => {
+    const issue = { key: 'ABC-4', fields: { summary: 'd', status: { name: 'Review', statusCategory: { key: 'indeterminate' } }, priority: { name: 'Critical' } } }
+    const expected = { key: 'ABC-4', summary: 'd', status: 'Review', category: 'indeterminate', priority: 'Critical', assignee: null, type: null }
+    for (const body of [
+      { issues: { nodes: [issue], pageInfo: { hasNextPage: false } } },
+      { data: { issues: { nodes: [issue] } } },
+      { issues: [issue] },
+      { data: { issues: [issue] } },
+    ]) {
+      expect(parseJiraIssues(JSON.stringify(body))).toEqual([expected])
+    }
+    expect(parseJiraIssues(JSON.stringify({ issues: { nodes: [] } }))).toEqual([])
+    expect(parseJiraIssues(JSON.stringify({}))).toEqual([])
+  })
+
+  test('a Jira answer without a list of issues is refused', () => {
+    expect(() => parseJiraIssues(JSON.stringify({ issues: {} }))).toThrow('the Jira answer holds no list of issues')
+    expect(() => parseJiraIssues(JSON.stringify({ issues: 'none' }))).toThrow('the Jira answer holds no list of issues')
+  })
+
   test('only issues really in progress and without a PR are listed alone', () => {
     const info = (key: string, status: string) => ({ key, summary: key, status, category: 'indeterminate', priority: null, assignee: null, type: null })
     expect(isWorkingStatus('In Progress')).toBe(true)

@@ -212,6 +212,9 @@ type JiraResult = {
 
 const JIRA_FIELDS = ['summary', 'status', 'priority', 'assignee', 'issuetype']
 
+/** What the pane says when the Atlassian connector's answer cannot be read. */
+const JIRA_UNREADABLE = "the Atlassian connector's answer could not be read"
+
 /**
  * Reads the Jira issues of the PRs and those assigned to me in progress.
  * @param keys - The Jira keys of the PRs.
@@ -524,8 +527,10 @@ const refresh = async ($: EngineInterface, options: Options, isAttended: boolean
     let jira: JiraResult
     try {
       jira = await fetchJira($, keys, asked)
-    } catch (error) {
-      jira = { jira: before?.jira ?? {}, inProgress: before?.jiraInProgress ?? [], site: before?.jiraSite ?? null, state: 'error', error: errorText(error) }
+    } catch {
+      // A throw here comes from reading the connector's answer, whose
+      // exception text means nothing to the person: name the cause instead.
+      jira = { jira: before?.jira ?? {}, inProgress: before?.jiraInProgress ?? [], site: before?.jiraSite ?? null, state: 'error', error: JIRA_UNREADABLE }
     }
     if (jira.state !== 'ok' && before !== null) {
       jira = { ...jira, jira: before.jira, inProgress: before.jiraInProgress, site: jira.site ?? before.jiraSite }

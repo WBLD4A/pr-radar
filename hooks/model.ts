@@ -391,13 +391,23 @@ export const applyMarks = (rows: PrRow[], marks: Marks): { rows: PrRow[]; marks:
   return { rows: placed, marks: kept }
 }
 
-/** Reads the issues out of the Atlassian connector's JQL answer. */
+type JiraIssue = { key: string; fields?: Record<string, unknown> }
+
+type JiraIssues = JiraIssue[] | { nodes?: JiraIssue[] }
+
+/**
+ * Reads the issues out of the Atlassian connector's JQL answer. The connector
+ * has answered with `issues` as a list, under `data` or not, and now answers
+ * with the list in `issues.nodes`.
+ * @param text - The connector's answer.
+ * @returns The issues, none when the answer holds no `issues`.
+ * @throws When the answer is not JSON or its `issues` holds no list.
+ */
 export const parseJiraIssues = (text: string): JiraInfo[] => {
-  const body = JSON.parse(text) as {
-    data?: { issues?: { key: string; fields?: Record<string, unknown> }[] }
-    issues?: { key: string; fields?: Record<string, unknown> }[]
-  }
-  const issues = body.data?.issues ?? body.issues ?? []
+  const body = JSON.parse(text) as { data?: { issues?: JiraIssues }; issues?: JiraIssues } | null
+  const found = body?.data?.issues ?? body?.issues ?? []
+  const issues = Array.isArray(found) ? found : found.nodes
+  if (!Array.isArray(issues)) throw new Error('the Jira answer holds no list of issues')
   return issues.map(issue => {
     const f = (issue.fields ?? {}) as {
       summary?: string
