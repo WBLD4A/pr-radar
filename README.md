@@ -118,6 +118,8 @@ claude plugin test .
 claude plugin validate .
 ```
 
+To publish a release, raise `version` in [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) and push it to `main`. The [release workflow](.github/workflows/release.yml) runs both checks, then creates the `v<version>` tag and its GitHub Release; a version with a `-` suffix is a prerelease. Running the workflow by hand publishes the current version when its tag does not exist yet.
+
 ## Privacy
 
 See the [privacy policy](PRIVACY.md).

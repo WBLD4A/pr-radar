@@ -1,0 +1,84 @@
+name: Release
+
+# A push to main that changes the version in .claude-plugin/plugin.json publishes v<version>.
+# A manual run publishes the current version when its tag is missing.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .claude-plugin/plugin.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'WBLD4A/pr-radar'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout with tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Read the plugin version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(jq -r '.version // empty' .claude-plugin/plugin.json)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error file=.claude-plugin/plugin.json::version '$version' is not MAJOR.MINOR.PATCH[-PRERELEASE]."
+            exit 1
+          fi
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::notice::$tag already exists; nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          [[ "$version" == *-* ]] && prerelease=true || prerelease=false
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        if: steps.version.outputs.release == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the Claude Code CLI
+        if: steps.version.outputs.release == 'true'
+        run: npm install --global @anthropic-ai/claude-code@2.1.299
+
+      - name: Validate the manifests
+        if: steps.version.outputs.release == 'true'
+        run: claude plugin validate .
+
+      - name: Run the tests
+        if: steps.version.outputs.release == 'true'
+        run: claude plugin test .
+
+      - name: Create the tag and the GitHub Release
+        if: steps.version.outputs.release == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          flags=()
+          [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "PR Radar $TAG" --generate-notes "${flags[@]}"
