@@ -393,22 +393,31 @@ export const applyMarks = (rows: PrRow[], marks: Marks): { rows: PrRow[]; marks:
 
 type JiraIssue = { key: string; fields?: Record<string, unknown> }
 
-type JiraIssues = JiraIssue[] | { nodes?: JiraIssue[] }
+type JiraIssues = JiraIssue[] | { nodes?: JiraIssue[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } }
+
+type JiraAnswer = { issues?: JiraIssues; nextPageToken?: string; isLast?: boolean }
 
 /**
- * Reads the issues out of the Atlassian connector's JQL answer. The connector
- * has answered with `issues` as a list, under `data` or not, and now answers
- * with the list in `issues.nodes`.
+ * Reads one page of the Atlassian connector's JQL answer. The connector has
+ * answered with `issues` as a list, under `data` or not, with `nextPageToken`
+ * and `isLast` beside it, and now answers with the list in `issues.nodes` and
+ * the next page's token in `issues.pageInfo.endCursor`.
  * @param text - The connector's answer.
- * @returns The issues, none when the answer holds no `issues`.
+ * @returns The issues, none when the answer holds no `issues`, and the token
+ *   to pass as `nextPageToken` for the next page, null on the last page.
  * @throws When the answer is not JSON or its `issues` holds no list.
  */
-export const parseJiraIssues = (text: string): JiraInfo[] => {
-  const body = JSON.parse(text) as { data?: { issues?: JiraIssues }; issues?: JiraIssues } | null
-  const found = body?.data?.issues ?? body?.issues ?? []
+export const parseJiraPage = (text: string): { issues: JiraInfo[]; next: string | null } => {
+  const body = JSON.parse(text) as (JiraAnswer & { data?: JiraAnswer }) | null
+  const answer = body?.data ?? body ?? {}
+  const found = answer.issues ?? []
   const issues = Array.isArray(found) ? found : found.nodes
   if (!Array.isArray(issues)) throw new Error('the Jira answer holds no list of issues')
-  return issues.map(issue => {
+  const pageInfo = Array.isArray(found) ? undefined : found.pageInfo
+  const next = pageInfo === undefined
+    ? answer.isLast === true ? null : answer.nextPageToken ?? null
+    : pageInfo.hasNextPage === true ? pageInfo.endCursor ?? null : null
+  const infos = issues.map(issue => {
     const f = (issue.fields ?? {}) as {
       summary?: string
       status?: { name?: string; statusCategory?: { key?: string } }
@@ -426,6 +435,7 @@ export const parseJiraIssues = (text: string): JiraInfo[] => {
       type: f.issuetype?.name ?? null,
     }
   })
+  return { issues: infos, next }
 }
 
 /** Reads the desktop app's `list_sessions` answer. */

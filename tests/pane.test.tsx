@@ -29,7 +29,7 @@ type Launched = { tool: string; input: Record<string, unknown> }
 
 type GitHub = { failure?: string; remaining?: number; resetAt?: string; resetEpoch?: number; queries: string[] }
 
-type Access = { asks: string[]; deny?: string; first: string[]; read: Launched[]; jiraAnswer?: string }
+type Access = { asks: string[]; deny?: string; first: string[]; read: Launched[]; jiraAnswer?: string; jiraInProgress?: number }
 
 const NOW = Date.parse('2026-10-13T12:00:00Z')
 
@@ -141,6 +141,17 @@ const host = (
       return { result: '', text: JSON.stringify({ data: { resources: [{ cloudId: 'c1', url: 'https://acme.atlassian.net' }] } }) }
     }
     if (e.tool === JIRA_SEARCH && access.jiraAnswer !== undefined) return { result: '', text: access.jiraAnswer }
+    if (e.tool === JIRA_SEARCH && access.jiraInProgress !== undefined && !String((e as { jql?: unknown }).jql).startsWith('key in')) {
+      const { maxResults, nextPageToken } = e as unknown as { maxResults: number; nextPageToken?: string }
+      const start = Number(nextPageToken ?? 0)
+      const end = Math.min(start + maxResults, access.jiraInProgress)
+      const nodes = Array.from({ length: end - start }, (_, i) => ({
+        key: `PAG-${start + i + 1}`,
+        fields: { summary: `Paged ticket ${start + i + 1}`, status: { name: 'In Progress' }, priority: { name: 'High' } },
+      }))
+      const hasNextPage = end < access.jiraInProgress
+      return { result: '', text: JSON.stringify({ issues: { nodes, pageInfo: { hasNextPage, endCursor: hasNextPage ? String(end) : null } } }) }
+    }
     if (e.tool === JIRA_SEARCH) {
       const jql = String((e as { jql?: unknown }).jql)
       const issues = jql.startsWith('key in')
@@ -492,6 +503,34 @@ test('a Jira answer that cannot be read shows a message, not the parser error', 
     expect(await ui.find(text(/not a function|holds no list|JSON/))).toBeUndefined()
     await ui.unmount()
   }
+})
+
+test('the in-progress Jira search is read page by page of at most 10 issues', async ($, on) => {
+  const { access } = host(on)
+  access.jiraInProgress = 25
+  await $.command.run(REFRESH)
+  const pages = access.read.filter(call => call.tool === JIRA_SEARCH && !String(call.input.jql).startsWith('key in'))
+  expect(pages.map(call => [call.input.maxResults, call.input.nextPageToken])).toEqual([
+    [10, undefined],
+    [10, '10'],
+    [10, '20'],
+  ])
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find(text('Paged ticket 1'))).toBeDefined()
+  expect(await ui.find(text(/could not be read/))).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the in-progress Jira search stops at 30 issues', async ($, on) => {
+  const { access } = host(on)
+  access.jiraInProgress = 45
+  await $.command.run(REFRESH)
+  const pages = access.read.filter(call => call.tool === JIRA_SEARCH && !String(call.input.jql).startsWith('key in'))
+  expect(pages.map(call => [call.input.maxResults, call.input.nextPageToken])).toEqual([
+    [10, undefined],
+    [10, '10'],
+    [10, '20'],
+  ])
 })
 
 test('of two Jira servers, the one the permission rules allow is read', async ($, on) => {

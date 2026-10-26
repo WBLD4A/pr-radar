@@ -13,7 +13,7 @@ import {
   jiraKeyOf,
   lonelyIssues,
   newlyUrgent,
-  parseJiraIssues,
+  parseJiraPage,
   parseSessions,
   pauseNote,
   repoOfRemote,
@@ -118,7 +118,7 @@ describe('Jira, sessions and ordering', () => {
   })
 
   test('a Jira status on hold parks any PR, a blocked one blocks mine; priority orders a lane', () => {
-    const issues = parseJiraIssues(
+    const { issues } = parseJiraPage(
       JSON.stringify({
         data: {
           issues: [
@@ -152,15 +152,29 @@ describe('Jira, sessions and ordering', () => {
       { issues: [issue] },
       { data: { issues: [issue] } },
     ]) {
-      expect(parseJiraIssues(JSON.stringify(body))).toEqual([expected])
+      expect(parseJiraPage(JSON.stringify(body)).issues).toEqual([expected])
     }
-    expect(parseJiraIssues(JSON.stringify({ issues: { nodes: [] } }))).toEqual([])
-    expect(parseJiraIssues(JSON.stringify({}))).toEqual([])
+    expect(parseJiraPage(JSON.stringify({ issues: { nodes: [] } })).issues).toEqual([])
+    expect(parseJiraPage(JSON.stringify({})).issues).toEqual([])
+  })
+
+  test('the next Jira page comes from the cursor of the nodes or the token of the list', () => {
+    const issue = { key: 'ABC-4', fields: {} }
+    const next = (body: unknown) => parseJiraPage(JSON.stringify(body)).next
+    expect(next({ issues: { nodes: [issue], pageInfo: { hasNextPage: true, endCursor: 'c2' } } })).toBe('c2')
+    expect(next({ data: { issues: { nodes: [issue], pageInfo: { hasNextPage: true, endCursor: 'c3' } } } })).toBe('c3')
+    expect(next({ issues: { nodes: [issue], pageInfo: { hasNextPage: false, endCursor: 'c2' } } })).toBeNull()
+    expect(next({ issues: { nodes: [issue], pageInfo: { hasNextPage: true, endCursor: null } } })).toBeNull()
+    expect(next({ issues: { nodes: [issue] } })).toBeNull()
+    expect(next({ issues: [issue], nextPageToken: 't2', isLast: false })).toBe('t2')
+    expect(next({ data: { issues: [issue], nextPageToken: 't3' } })).toBe('t3')
+    expect(next({ issues: [issue], nextPageToken: 't2', isLast: true })).toBeNull()
+    expect(next({ issues: [issue] })).toBeNull()
   })
 
   test('a Jira answer without a list of issues is refused', () => {
-    expect(() => parseJiraIssues(JSON.stringify({ issues: {} }))).toThrow('the Jira answer holds no list of issues')
-    expect(() => parseJiraIssues(JSON.stringify({ issues: 'none' }))).toThrow('the Jira answer holds no list of issues')
+    expect(() => parseJiraPage(JSON.stringify({ issues: {} }))).toThrow('the Jira answer holds no list of issues')
+    expect(() => parseJiraPage(JSON.stringify({ issues: 'none' }))).toThrow('the Jira answer holds no list of issues')
   })
 
   test('only issues really in progress and without a PR are listed alone', () => {

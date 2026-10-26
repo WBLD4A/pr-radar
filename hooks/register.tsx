@@ -18,7 +18,7 @@ import {
   laneCounts,
   lonelyIssues as workingIssues,
   newlyUrgent,
-  parseJiraIssues,
+  parseJiraPage,
   parseSessions,
   pauseNote,
   priorityMark,
@@ -216,6 +216,45 @@ const JIRA_FIELDS = ['summary', 'status', 'priority', 'assignee', 'issuetype']
 const JIRA_UNREADABLE = "the Atlassian connector's answer could not be read"
 
 /**
+ * The issues asked per search call. An issue weighs about 1.7 KB in the
+ * connector's answer; past the MCP output limit (30 issues did), the engine
+ * hands back a notice that the answer was saved to a file instead of the JSON.
+ */
+const JIRA_PAGE = 10
+
+/**
+ * Runs one JQL search page by page, so that each answer stays small enough to
+ * come back whole.
+ * @param search - The search tool's full name.
+ * @param input - The search's arguments, without `maxResults` and `nextPageToken`.
+ * @param limit - The most issues to read, over all pages.
+ * @param asked - How the refresh was raised, for the permission of each call.
+ * @returns The issues read, or the source state and its reason when a call is
+ *   skipped, refused or fails.
+ * @throws When an answer cannot be read.
+ */
+const searchJira = async (
+  $: EngineInterface,
+  search: string,
+  input: Record<string, unknown>,
+  limit: number,
+  asked: Asked,
+): Promise<{ issues: JiraInfo[] } | { state: SourceState; reason: string }> => {
+  const issues: JiraInfo[] = []
+  let token: string | null = null
+  do {
+    const page = { ...input, maxResults: Math.min(JIRA_PAGE, limit - issues.length), ...(token === null ? {} : { nextPageToken: token }) }
+    const got = await callTool($, search, page, asked)
+    if (!('text' in got)) return got
+    const read = parseJiraPage(got.text)
+    issues.push(...read.issues)
+    // A page without issues ends the search even when it names a next one.
+    token = read.issues.length === 0 ? null : read.next
+  } while (token !== null && issues.length < limit)
+  return { issues }
+}
+
+/**
  * Reads the Jira issues of the PRs and those assigned to me in progress.
  * @param keys - The Jira keys of the PRs.
  * @param asked - How the refresh was raised, for the permission of each call.
@@ -239,27 +278,22 @@ const fetchJira = async ($: EngineInterface, keys: string[], asked: Asked): Prom
   }
   const jira: Record<string, JiraInfo> = {}
   if (keys.length > 0) {
-    const got = await callTool(
-      $,
-      search,
-      { cloudId: site.cloudId, jql: `key in (${keys.join(', ')})`, fields: JIRA_FIELDS, maxResults: 100 },
-      asked,
-    )
-    if (!('text' in got)) return { ...empty, site: site.url, state: got.state, error: got.reason }
-    for (const issue of parseJiraIssues(got.text)) jira[issue.key] = issue
+    const got = await searchJira($, search, { cloudId: site.cloudId, jql: `key in (${keys.join(', ')})`, fields: JIRA_FIELDS }, 100, asked)
+    if (!('issues' in got)) return { ...empty, site: site.url, state: got.state, error: got.reason }
+    for (const issue of got.issues) jira[issue.key] = issue
   }
-  const mine = await callTool(
+  const mine = await searchJira(
     $,
     search,
     {
       cloudId: site.cloudId,
       jql: 'assignee = currentUser() AND statusCategory = "In Progress" ORDER BY priority DESC, updated DESC',
       fields: JIRA_FIELDS,
-      maxResults: 30,
     },
+    30,
     asked,
   )
-  const inProgress = 'text' in mine ? parseJiraIssues(mine.text) : []
+  const inProgress = 'issues' in mine ? mine.issues : []
   for (const issue of inProgress) jira[issue.key] ??= issue
   return { jira, inProgress, site: site.url, state: 'ok' }
 }
