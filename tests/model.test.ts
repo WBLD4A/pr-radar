@@ -12,11 +12,14 @@ import {
   isWorkingStatus,
   jiraKeyOf,
   lonelyIssues,
+  markReport,
   newlyUrgent,
   parseJiraPage,
   parseSessions,
   pauseNote,
+  prIdOf,
   repoOfRemote,
+  resolveMarks,
   sessionsOf,
   sortPrs,
   statusText,
@@ -86,6 +89,40 @@ describe('work marked in progress', () => {
     expect(applyMarks([], marked.marks).marks).toEqual({})
     const held = { ...row, lane: 'onhold' as const }
     expect(applyMarks([held], { [row.id]: row.updatedAt }).rows[0]?.lane).toBe('onhold')
+  })
+
+  test('a PR is named by its id or any page of its URL', () => {
+    expect(prIdOf('acme/app#12')).toBe('acme/app#12')
+    expect(prIdOf(' acme/my.app#12 ')).toBe('acme/my.app#12')
+    expect(prIdOf('https://github.com/acme/app/pull/12')).toBe('acme/app#12')
+    expect(prIdOf('https://github.com/acme/app/pull/12/files?w=1')).toBe('acme/app#12')
+    expect(prIdOf('github.com/acme/app/pull/12#discussion_r1')).toBe('acme/app#12')
+    expect(prIdOf('https://github.com/acme/app/issues/12')).toBeNull()
+    expect(prIdOf('#12')).toBeNull()
+    expect(prIdOf('acme/app')).toBeNull()
+  })
+
+  test('the mark tool finds its PRs in the snapshot, once each, and says which it cannot', () => {
+    const rows = [classify(rawPr({ number: 1 }), ME, 'author'), classify(rawPr({ number: 2, labels: ['on hold'] }), ME, 'author')]
+    const targets = resolveMarks(
+      ['ACME/App#1', 'https://github.com/acme/app/pull/1', 'acme/app#9', 'nonsense', 'acme/app#2'],
+      rows,
+    )
+    expect(targets).toEqual([
+      { ref: 'ACME/App#1', row: rows[0] },
+      { ref: 'acme/app#9', error: 'acme/app#9 is not among the open PRs the radar lists' },
+      { ref: 'nonsense', error: 'not a PR reference: give owner/repo#123 or the PR URL' },
+      { ref: 'acme/app#2', row: rows[1] },
+    ])
+    const marked = applyMarks(rows, { 'acme/app#1': rows[0]!.updatedAt, 'acme/app#2': rows[1]!.updatedAt }).rows
+    expect(markReport(targets, marked, true).split('\n')).toEqual([
+      'PR Radar: Marked in progress; a mark lasts until the PR next changes on GitHub.',
+      '- acme/app#1: In progress',
+      '- acme/app#9: error: acme/app#9 is not among the open PRs the radar lists',
+      '- nonsense: error: not a PR reference: give owner/repo#123 or the PR URL',
+      '- acme/app#2: On hold (a PR on hold cannot be marked in progress)',
+    ])
+    expect(markReport(targets.slice(0, 1), rows, false)).toContain('- acme/app#1: Your turn')
   })
 })
 

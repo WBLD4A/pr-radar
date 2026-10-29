@@ -22,7 +22,7 @@ Then run `/reload-plugins` in open sessions.
 
 ## Use
 
-The pane opens on its own at the start of every session, without taking focus. `/prs` reopens it, and `/prs refresh` refreshes it right away. While the pane is closed, a button above the prompt reopens it. The model reads the same data through the mod's `snapshot` tool, so you can ask it things like "what should I do next?".
+The pane opens on its own at the start of every session, without taking focus. `/prs` reopens it, and `/prs refresh` refreshes it right away. While the pane is closed, a button above the prompt reopens it. The model reads the same data through the mod's `snapshot` tool, so you can ask it things like "what should I do next?", and marks pull requests in progress through its `mark` tool.
 
 The pane has seven lanes, in this order:
 
@@ -44,6 +44,8 @@ What a card's buttons do:
 - copy the pull request's URL.
 
 On your own pull requests, **Mark ready** marks a draft ready for review, and **Back to draft** turns a pull request in the Ready for manual review lane back into a draft. Both run `gh pr ready`. A mark lasts until the pull request next changes on GitHub.
+
+An agent can set the same mark without the button through the mod's `mark` tool, `mcp__pr-radar__mark`. It takes `prs`, a list of `owner/repo#123` references or pull request URLs, and `inProgress`, `true` to mark them or `false` to remove the mark. It answers each pull request's new lane, or why that pull request is not in the radar. The mark lives in the radar only: it changes nothing in Jira or on GitHub, and a pull request on hold stays on hold.
 
 A new conversation opens as a desktop session when the app offers one. Otherwise it opens in a new Terminal tab with a PowerShell command, a fallback that works only on Windows. If neither is possible, the prompt goes into the composer.
 
@@ -79,10 +81,10 @@ Tools of the session it calls: the Atlassian connector's JQL search and site lis
 
 ### Notes for the directory review
 
-- **Tools the mod calls itself** (`callTool` in `hooks/register.tsx`): only the session tools named above, found by these fixed name suffixes: `__searchJiraIssuesUsingJql`, `__getAccessibleAtlassianResources`, `ccd_session_mgmt__list_sessions`, `__start_session`, `ccd_session_mgmt__send_message` and `terminal__run_in_terminal`. The Jira and session-list calls run on each refresh. The other three run only when you press a card's button to start or continue a conversation. The tool name comes from the session's tool list, which is why it is not written as fixed text; no server answer ever picks a tool or a command.
+- **Tools the mod calls itself** (`callTool` in `hooks/register.tsx`): only the session tools named above, found by these fixed name suffixes: `__searchJiraIssuesUsingJql`, `__getAccessibleAtlassianResources`, `ccd_session_mgmt__list_sessions`, `__start_session`, `ccd_session_mgmt__send_message` and `terminal__run_in_terminal`. The Jira and session-list calls run on each refresh. The other three run only when you press a card's button to start or continue a conversation. The `mark` tool calls none of them; it refreshes the radar only when the session has no snapshot yet. The tool name comes from the session's tool list, which is why it is not written as fixed text; no server answer ever picks a tool or a command.
 - **The `gh api graphql` command** (`graphql` in `hooks/register.tsx`): the program and its flags are fixed text. The query is a constant built in `hooks/model.ts`, and its `$q1`…`$q4` variables are GitHub search strings made from your login (`author:<login>`, `review-requested:<login>`, and so on); the detail query takes only the pull request ids the first one returned. Only GitHub's answer is read; it is parsed as data and never run.
 - **Environment variables read**: `USERPROFILE` or `HOME`, to find your home folder, and `CLAUDE_CODE_EXECPATH`, to start `claude` in the Terminal fallback. The mod reads no token or key: `gh` uses its own sign-in, and nothing read from the environment is sent anywhere.
-- **Conversation data**: the mod's only `tool.call` hook is on its own `mcp__pr-radar__snapshot` tool. It answers that tool with the radar's summary in place of a server, as a mod-registered tool does. It does not see or change any other tool call, and sends no conversation text out.
+- **Conversation data**: the mod's only `tool.call` hooks are on its own `mcp__pr-radar__snapshot` and `mcp__pr-radar__mark` tools. It answers them in place of a server, as a mod-registered tool does: `snapshot` with the radar's summary, `mark` by setting or removing the radar's own in-progress marks in the plugin's store. It does not see or change any other tool call, and sends no conversation text out.
 - **The `command.run` hook** handles only the mod's own `/prs` command: it opens the pane, and with `refresh` refreshes it.
 
 ## Options

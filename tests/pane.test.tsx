@@ -310,6 +310,29 @@ test('In progress moves a PR to its own lane, Remove gives its lane back', async
   await ui.unmount()
 })
 
+test('the model-callable mark moves PRs to In progress and back, as the button does', async ($, on) => {
+  const { github } = host(on)
+  const ran = await $.tool.call({
+    tool: 'mcp__pr-radar__mark',
+    prs: ['acme/app#6', 'https://github.com/acme/app/pull/4/files', 'acme/app#99'],
+    inProgress: true,
+  } as never)
+  expect(github.queries).toEqual(['ids', 'details'])
+  expect(String(ran.result)).toContain('- acme/app#6: In progress')
+  expect(String(ran.result)).toContain('- acme/app#4: In progress')
+  expect(String(ran.result)).toContain('- acme/app#99: error: acme/app#99 is not among the open PRs the radar lists')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find(text(/◐ In progress/))).toBeDefined()
+  expect((await ui.find({ key: 'wip-acme/app#6' }))?.props.label).toBe('Remove')
+  const removed = await $.tool.call({ tool: 'mcp__pr-radar__mark', prs: ['acme/app#6', 'acme/app#4'], inProgress: false } as never)
+  expect(String(removed.result)).toContain('- acme/app#6: Your turn')
+  expect(github.queries).toEqual(['ids', 'details'])
+  expect(await ui.find(text(/◐ In progress/))).toBeUndefined()
+  await ui.unmount()
+  const wrong = await $.tool.call({ tool: 'mcp__pr-radar__mark', prs: [] } as never)
+  expect(wrong.deny).toContain('PR Radar mark')
+})
+
 test('Continue picks up unfinished sessions, runs and Jira issues', async ($, on) => {
   const { launched } = host(on, [START, SEND])
   await $.command.run({ command: 'prs', args: 'refresh', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })

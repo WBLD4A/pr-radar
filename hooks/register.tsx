@@ -17,12 +17,14 @@ import {
   isRateLimited,
   laneCounts,
   lonelyIssues as workingIssues,
+  markReport,
   newlyUrgent,
   parseJiraPage,
   parseSessions,
   pauseNote,
   priorityMark,
   repoOfRemote,
+  resolveMarks,
   runsOf,
   searches,
   sessionsOf,
@@ -666,6 +668,30 @@ const setMark = async ($: EngineInterface, row: PrRow, isOn: boolean): Promise<v
   await $.store.set(STORE_KEY, next)
 }
 
+/**
+ * The `mark` tool: marks PRs in progress, or takes the marks back, as the
+ * card's button does. A session without a snapshot yet takes the one the
+ * sessions share, else refreshes.
+ * @param input - The tool's arguments: `prs`, each `owner/repo#123` or a PR URL, and `inProgress`.
+ * @returns The answer the model reads, or a deny when the arguments are wrong.
+ */
+const markTool = async ($: EngineInterface, options: Options, input: { prs?: unknown; inProgress?: unknown }): Promise<{ result: string } | { deny: string }> => {
+  const { prs, inProgress } = input
+  if (!Array.isArray(prs) || prs.length === 0 || !prs.every(ref => typeof ref === 'string') || typeof inProgress !== 'boolean') {
+    return { deny: 'PR Radar mark: give `prs`, a non-empty list of owner/repo#123 or PR URLs, and `inProgress`, true or false.' }
+  }
+  if ((await read($, snapshotAtom)) === null) {
+    const stored = (await $.store.get(STORE_KEY)) as Snapshot | undefined
+    if (stored !== undefined) await show($, { ...stored, prs: await withMarks($, stored.prs, stored.jira) })
+    else await refresh($, options, true)
+  }
+  const snapshot = await read($, snapshotAtom)
+  if (snapshot === null) return { result: 'PR Radar: no data yet; nothing was marked. Try again once the radar has refreshed.' }
+  const targets = resolveMarks(prs as string[], snapshot.prs)
+  for (const target of targets) if ('row' in target) await setMark($, target.row, inProgress)
+  return { result: markReport(targets, (await read($, snapshotAtom))?.prs ?? snapshot.prs, inProgress) }
+}
+
 /** Adopts a fresher snapshot or marks another session stored, or refreshes once it is stale. */
 const tick = async ($: EngineInterface, options: Options): Promise<void> => {
   const intervalMs = Math.max(1, options.refreshMinutes ?? 5) * 60_000
@@ -699,7 +725,7 @@ const quietly = (work: () => Promise<unknown>): void => {
 }
 
 /**
- * Registers the radar: the `/prs` command, the `snapshot` tool, the periodic
+ * Registers the radar: the `/prs` command, the `snapshot` and `mark` tools, the periodic
  * refresh, the pane, and the button above the prompt that reopens the pane
  * while it is closed. Each PR card holds three rows split left and right: the
  * title and repository; why it is in its lane and its CI, threads and
@@ -721,6 +747,24 @@ export const register: Register = (on, rawOptions) => {
       description:
         'PR Radar: the account’s open GitHub PRs (authored, review requested, reviewed, assigned), sorted by who must act, with CI, review threads, Jira status and priority, linked Claude sessions and unfinished Agent Context work. Use it to answer “what should I do next” or “where are my PRs”.',
       inputSchema: { type: 'object', properties: { refresh: { type: 'boolean', description: 'Refresh before answering' } } },
+    })
+    await $.tool.register({
+      name: 'mark',
+      description:
+        'PR Radar: marks open PRs “In progress” in the radar (not in Jira or GitHub), or removes the mark, as the card’s In progress button does. Use it for each PR a session is actively working on. A mark lasts until the PR next changes on GitHub. Answers each PR’s lane, or why it was not found.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          prs: {
+            type: 'array',
+            items: { type: 'string' },
+            minItems: 1,
+            description: 'The PRs, each as owner/repo#123 or its GitHub URL',
+          },
+          inProgress: { type: 'boolean', description: 'True marks the PRs in progress, false removes the mark' },
+        },
+        required: ['prs', 'inProgress'],
+      },
     })
     $.clock.every(TICK_MS, () => quietly(() => tick($, options)))
     quietly(() => tick($, options))
@@ -748,6 +792,10 @@ export const register: Register = (on, rawOptions) => {
     const text = snapshot === null ? 'PR Radar: no data yet.' : summary(snapshot, await $.clock.now())
     return { result: text }
   }).catch(() => ({ result: 'PR Radar: cannot read the data right now.' }))
+
+  on('tool.call', { tool: 'mcp__pr-radar__mark' }, async ($, e) =>
+    markTool($, options, e as { prs?: unknown; inProgress?: unknown }),
+  ).catch(() => ({ result: 'PR Radar: cannot mark the PRs right now.' }))
 
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE) await update($, paneOpenAtom, () => false)

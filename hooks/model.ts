@@ -391,6 +391,66 @@ export const applyMarks = (rows: PrRow[], marks: Marks): { rows: PrRow[]; marks:
   return { rows: placed, marks: kept }
 }
 
+/**
+ * The row id (`owner/repo#123`) a PR reference names: the id itself, or the
+ * PR's GitHub URL, any page of it.
+ * @param ref - What the `mark` tool was given.
+ * @returns The id, or null when the reference names no PR.
+ */
+export const prIdOf = (ref: string): string | null => {
+  const text = ref.trim()
+  const url = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)(?:[/?#]\S*)?$/i.exec(text)
+  if (url !== null) return `${url[1]}/${url[2]}#${url[3]}`
+  const id = /^([^/\s#]+)\/([^/\s#]+)#(\d+)$/.exec(text)
+  return id === null ? null : `${id[1]}/${id[2]}#${id[3]}`
+}
+
+/** One PR the `mark` tool was given: its row in the snapshot, or why it has none. */
+export type MarkTarget = { ref: string; row: PrRow } | { ref: string; error: string }
+
+/**
+ * Finds the rows the `mark` tool names, whatever the case of their
+ * repository; a PR named twice is taken once.
+ * @param refs - The PR references, `owner/repo#123` or PR URLs.
+ * @param rows - The PRs of the snapshot.
+ * @returns One target per distinct reference, in order.
+ */
+export const resolveMarks = (refs: string[], rows: PrRow[]): MarkTarget[] => {
+  const byId = new Map(rows.map(row => [row.id.toLowerCase(), row]))
+  const seen = new Set<string>()
+  const targets: MarkTarget[] = []
+  for (const ref of refs) {
+    const id = prIdOf(ref)
+    if (id === null) {
+      targets.push({ ref, error: 'not a PR reference: give owner/repo#123 or the PR URL' })
+      continue
+    }
+    if (seen.has(id.toLowerCase())) continue
+    seen.add(id.toLowerCase())
+    const row = byId.get(id.toLowerCase())
+    targets.push(row === undefined ? { ref, error: `${id} is not among the open PRs the radar lists` } : { ref, row })
+  }
+  return targets
+}
+
+/**
+ * The `mark` tool's answer: each PR's lane once marked, or its error.
+ * @param targets - What {@link resolveMarks} found.
+ * @param rows - The PRs of the snapshot after the marks.
+ * @param isOn - True when the PRs were marked in progress, false when the mark was taken back.
+ */
+export const markReport = (targets: MarkTarget[], rows: PrRow[], isOn: boolean): string => {
+  const lines = targets.map(target => {
+    if ('error' in target) return `- ${target.ref}: error: ${target.error}`
+    const row = rows.find(one => one.id === target.row.id) ?? target.row
+    const label = LANES.find(lane => lane.id === row.lane)?.label ?? row.lane
+    const note = isOn && row.lane === 'onhold' ? ' (a PR on hold cannot be marked in progress)' : ''
+    return `- ${row.id}: ${label}${note}`
+  })
+  const verb = isOn ? 'Marked in progress' : 'Mark removed'
+  return [`PR Radar: ${verb}; a mark lasts until the PR next changes on GitHub.`, ...lines].join('\n')
+}
+
 type JiraIssue = { key: string; fields?: Record<string, unknown> }
 
 type JiraIssues = JiraIssue[] | { nodes?: JiraIssue[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } }

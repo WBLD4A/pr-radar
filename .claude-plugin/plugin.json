@@ -1,6 +1,6 @@
 {
   "name": "pr-radar",
-  "version": "0.3.8",
+  "version": "0.4.0",
   "description": "PR Radar pane: every GitHub PR tied to your account, sorted by who must act (blocked, your turn, ready, waiting, draft), with the Jira status and priority, CI, review threads, Claude sessions and unfinished Agent Context work.",
   "author": {
     "name": "WBLD4A"
