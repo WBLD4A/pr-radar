@@ -99,8 +99,8 @@ export type Snapshot = {
 /** The PRs marked in progress: id -> the PR's `updatedAt` when marked; the next change clears it. */
 export type Marks = Record<string, string>
 
-/** Which pull requests the pane lists. */
-export type Filter = 'all' | 'mine' | 'reviews' | 'todo'
+/** Which pull requests the pane lists: all, your turn only, or ready for manual review only. */
+export type Filter = 'all' | 'todo' | 'ready'
 
 declare module 'claude-code' {
   interface PluginState {

@@ -61,16 +61,18 @@ type Budget = { remaining: number; resetAt: string } | null
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'todo', label: 'To do' },
-  { id: 'mine', label: 'My PRs' },
-  { id: 'reviews', label: 'Reviews' },
+  { id: 'ready', label: 'Ready' },
 ]
 
+/** To do keeps the Your turn lane only, Ready the Ready for manual review lane only. */
 const matchesFilter = (row: PrRow, filter: Filter): boolean => {
-  if (filter === 'mine') return row.role === 'author'
-  if (filter === 'reviews') return row.role !== 'author'
-  if (filter === 'todo') return ['blocked', 'action', 'inprogress', 'ready'].includes(row.lane)
+  if (filter === 'todo') return row.lane === 'action'
+  if (filter === 'ready') return row.lane === 'ready'
   return true
 }
+
+/** A filter saved by an older version (My PRs, Reviews) falls back to All. */
+const knownFilter = (filter: string): Filter => (FILTERS.some(one => one.id === filter) ? (filter as Filter) : 'all')
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
@@ -827,7 +829,7 @@ export const register: Register = (on, rawOptions) => {
     const { Box, Button, Link, Text } = $.ui.resolve(e)
     const snapshot = await read($, snapshotAtom)
     const isRefreshing = await read($, refreshingAtom)
-    const filter = await read($, filterAtom)
+    const filter = knownFilter(await read($, filterAtom))
     const folded = await read($, foldedAtom)
     const now = Math.max(await read($, clockAtom), snapshot?.fetchedAt ?? 0)
 
@@ -1079,7 +1081,7 @@ export const register: Register = (on, rawOptions) => {
     }
 
     const extras =
-      filter === 'mine' || filter === 'reviews'
+      filter === 'ready'
         ? []
         : [
             section(
