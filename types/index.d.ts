@@ -110,6 +110,8 @@ declare module 'claude-code' {
       filter: Filter
       /** The lanes drawn folded; drafts and on-hold work start folded. */
       folded: Lane[]
+      /** The lanes drawn folded under To do; none at first, so its drafts show. */
+      foldedTodo: Lane[]
       /** The last tick's time: the pane's "now", so relative times move each minute. */
       clock: number
       /** Whether the pane is open; while it is closed the band above the prompt offers it. */

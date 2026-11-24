@@ -47,6 +47,7 @@ const snapshotAtom = atom({ plugin: 'pr-radar', key: 'snapshot' } as const, null
 const refreshingAtom = atom({ plugin: 'pr-radar', key: 'isRefreshing' } as const, false)
 const filterAtom = atom({ plugin: 'pr-radar', key: 'filter' } as const, 'all')
 const foldedAtom = atom({ plugin: 'pr-radar', key: 'folded' } as const, ['draft', 'onhold'])
+const foldedTodoAtom = atom({ plugin: 'pr-radar', key: 'foldedTodo' } as const, [])
 const clockAtom = atom({ plugin: 'pr-radar', key: 'clock' } as const, 0)
 const paneOpenAtom = atom({ plugin: 'pr-radar', key: 'isPaneOpen' } as const, false)
 
@@ -64,12 +65,16 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'ready', label: 'Ready' },
 ]
 
-/** To do keeps the Your turn lane only, Ready the Ready for manual review lane only. */
+/** To do keeps the Your turn and Draft lanes, Ready the Ready for manual review lane only. */
 const matchesFilter = (row: PrRow, filter: Filter): boolean => {
-  if (filter === 'todo') return row.lane === 'action'
+  if (filter === 'todo') return row.lane === 'action' || row.lane === 'draft'
   if (filter === 'ready') return row.lane === 'ready'
   return true
 }
+
+/** Adds a lane to the folded list, or removes it when already folded. */
+const toggled = (list: Lane[], lane: Lane): Lane[] =>
+  list.includes(lane) ? list.filter(one => one !== lane) : [...list, lane]
 
 /** A filter saved by an older version (My PRs, Reviews) falls back to All. */
 const knownFilter = (filter: string): Filter => (FILTERS.some(one => one.id === filter) ? (filter as Filter) : 'all')
@@ -830,7 +835,7 @@ export const register: Register = (on, rawOptions) => {
     const snapshot = await read($, snapshotAtom)
     const isRefreshing = await read($, refreshingAtom)
     const filter = knownFilter(await read($, filterAtom))
-    const folded = await read($, foldedAtom)
+    const folded = filter === 'todo' ? await read($, foldedTodoAtom) : await read($, foldedAtom)
     const now = Math.max(await read($, clockAtom), snapshot?.fetchedAt ?? 0)
 
     const refreshButton = (
@@ -999,9 +1004,9 @@ export const register: Register = (on, rawOptions) => {
         plain
         onPress={() =>
           quietly(() =>
-            update($, foldedAtom, list =>
-              list.includes(id as Lane) ? list.filter(one => one !== id) : [...list, id as Lane],
-            ),
+            filter === 'todo'
+              ? update($, foldedTodoAtom, list => toggled(list, id as Lane))
+              : update($, foldedAtom, list => toggled(list, id as Lane)),
           )
         }
       >
