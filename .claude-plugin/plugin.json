@@ -1,6 +1,6 @@
 {
   "name": "pr-radar",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "PR Radar pane: every GitHub PR tied to your account, sorted by who must act (blocked, your turn, ready, waiting, draft), with the Jira status and priority, CI, review threads, Claude sessions and unfinished Agent Context work.",
   "author": {
     "name": "WBLD4A"
@@ -29,6 +29,13 @@
       "title": "Refresh interval (minutes)",
       "description": "Minutes between two automatic refreshes, shared by the sessions.",
       "default": 5
+    },
+    "conflicts": {
+      "type": "string",
+      "title": "New conflicts on my PRs",
+      "description": "off: nothing. notify: a toast, and the PR's linked Claude session is told. fix: that session, or a new one when none is linked, is asked to resolve them.",
+      "options": ["off", "notify", "fix"],
+      "default": "notify"
     }
   }
 }

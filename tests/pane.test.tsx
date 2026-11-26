@@ -47,6 +47,7 @@ const host = (
   github: GitHub
   access: Access
   clock: MockClock
+  data: ReturnType<typeof search>
 } => {
   const github: GitHub = { queries: [] }
   const access: Access = { asks: [], first: [], read: [] }
@@ -186,7 +187,15 @@ const host = (
     prompts.push(e.text)
     return { isFilled: true, box: { text: e.text, cursor: e.text.length } } as never
   })
-  return { prompts, launched, copied, readied, toasts, github, access, clock }
+  return { prompts, launched, copied, readied, toasts, github, access, clock, data }
+}
+
+/** Makes one of my PRs conflict, as a push to its base would, and changes its `updatedAt`. */
+const conflict = (data: ReturnType<typeof search>, number: number): void => {
+  const pr = data.authored.nodes.find(one => one.number === number)
+  if (pr === undefined) throw new Error(`no PR ${number}`)
+  pr.mergeable = 'CONFLICTING'
+  pr.updatedAt = '2026-10-13T11:00:00Z'
 }
 
 const text = (value: string | RegExp) => ({ type: 'Text', text: value })
@@ -584,4 +593,64 @@ test('an automatic refresh the rules allow carries no consent', async ($, on) =>
   await clock.settle()
   expect(access.read.length).toBeGreaterThan(0)
   for (const call of access.read) expect(call.input.consent).toBeUndefined()
+})
+
+test('a new conflict on my PR is told to its linked session once, without consent', async ($, on) => {
+  const { data, launched, toasts } = host(on, [START, SEND])
+  await $.command.run(REFRESH)
+  expect(launched).toEqual([])
+
+  conflict(data, 1)
+  await $.command.run(REFRESH)
+  expect(launched.map(call => [call.tool, call.input.session_id])).toEqual([[SEND, 's1']])
+  expect(String(launched[0]?.input.message)).toContain('https://github.com/acme/app/pull/1')
+  expect(String(launched[0]?.input.message)).toContain('do not resolve them unless I ask')
+  expect(launched[0]?.input.consent).toBeUndefined()
+  expect(toasts.filter(one => one.startsWith('app#1'))).toEqual(['app#1: conflicts with main, sent to “Chaîne ABC-1”'])
+
+  await $.command.run(REFRESH)
+  expect(launched.length).toBe(1)
+})
+
+test('conflicts already there when the radar first looks are only recorded', async ($, on) => {
+  const { data, launched } = host(on, [START, SEND])
+  conflict(data, 1)
+  await $.command.run(REFRESH)
+  await $.command.run(REFRESH)
+  expect(launched).toEqual([])
+})
+
+test('fix asks the linked session to resolve, or starts a session in the checkout', { options: { conflicts: 'fix' } }, async ($, on) => {
+  const { data, launched, toasts } = host(on, [START, SEND])
+  await $.command.run(REFRESH)
+  conflict(data, 1)
+  conflict(data, 6)
+  await $.command.run(REFRESH)
+  const send = launched.find(call => call.tool === SEND)
+  expect(send?.input.session_id).toBe('s1')
+  expect(String(send?.input.message)).toContain('Resolve them')
+  const start = launched.find(call => call.tool === START)
+  expect(start?.input).toMatchObject({ initiation: 'user_asked', title: 'Resolve app#6', context: 'fresh', cwd: 'C:/src/app' })
+  expect(String(start?.input.prompt)).toContain('https://github.com/acme/app/pull/6')
+  expect(toasts).toContain('app#6: conflicts with main, new session: Resolve app#6')
+})
+
+test('a session tool the rules do not allow gets a toast, never a dialog', { options: { conflicts: 'fix' } }, async ($, on) => {
+  const { access, data, launched, toasts } = host(on, [START, SEND])
+  await $.command.run(REFRESH)
+  access.asks = [SEND, START]
+  conflict(data, 1)
+  conflict(data, 6)
+  await $.command.run(REFRESH)
+  expect(launched).toEqual([])
+  expect(toasts).toContain('app#1: conflicts with main (allow ccd_session_mgmt__send_message to tell its session)')
+  expect(toasts).toContain('app#6: conflicts with main (allow start_session to resolve them on its own)')
+})
+
+test('off reports nothing beyond the card', { options: { conflicts: 'off' } }, async ($, on) => {
+  const { data, launched } = host(on, [START, SEND])
+  await $.command.run(REFRESH)
+  conflict(data, 1)
+  await $.command.run(REFRESH)
+  expect(launched).toEqual([])
 })

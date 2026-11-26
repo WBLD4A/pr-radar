@@ -608,6 +608,57 @@ export const actionPrompt = (marked: PrRow): { label: string; text: string } | n
   return { label: 'Resume', text: `Where does ${row.url} stand? Suggest the next step.` }
 }
 
+/** What a new conflict on my PR does: nothing, a report to Claude, or a request to resolve it. */
+export type ConflictMode = 'off' | 'notify' | 'fix'
+
+/** The `conflicts` option, `notify` when unset or unknown. */
+export const conflictModeOf = (value: unknown): ConflictMode =>
+  value === 'off' || value === 'fix' ? value : 'notify'
+
+/** My PRs already reported for their current conflict: id -> the PR's `updatedAt` when reported. */
+export type ConflictAlerts = Record<string, string>
+
+/**
+ * My PRs whose conflict has not been reported yet, and the reported list to
+ * keep. A PR stays reported while it conflicts, and while it changed nothing
+ * since the report, so that GitHub recomputing its mergeability after a push
+ * to the base does not report it twice. A PR that is gone, or that changed
+ * and no longer conflicts, leaves the list: its next conflict is new.
+ * @param prs - The PRs of the latest refresh.
+ * @param alerts - The PRs reported so far.
+ * @returns The PRs to report now, and the reported list including them.
+ */
+export const newConflicts = (prs: PrRow[], alerts: ConflictAlerts): { fresh: PrRow[]; alerts: ConflictAlerts } => {
+  const mine = prs.filter(row => row.role === 'author')
+  const kept: ConflictAlerts = {}
+  const fresh: PrRow[] = []
+  for (const row of mine) {
+    const at = alerts[row.id]
+    if (row.hasConflicts) {
+      if (at === undefined) fresh.push(row)
+      kept[row.id] = at ?? row.updatedAt
+    } else if (at !== undefined && at === row.updatedAt) {
+      kept[row.id] = at
+    }
+  }
+  return { fresh, alerts: kept }
+}
+
+/** The open session that knows the PR best: the one active most recently among its linked sessions. */
+export const ownerSession = (row: PrRow, sessions: SessionInfo[]): SessionInfo | null =>
+  [...sessionsOf(row, sessions)].sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))[0] ?? null
+
+/**
+ * What a session is told about a PR that newly conflicts with its base:
+ * a report to keep in mind, or the request to resolve it.
+ */
+export const conflictMessage = (row: PrRow, mode: 'notify' | 'fix'): string => {
+  const fact = `PR Radar: the pull request ${row.url} “${row.title}” (branch ${row.branch}) now has merge conflicts with ${row.base}.`
+  return mode === 'fix'
+    ? `${fact} Resolve them: bring ${row.base} into ${row.branch}, fix the conflicts, run the relevant checks and push without force-pushing, then tell me what changed.`
+    : `${fact} Mention it in your next report; do not resolve them unless I ask.`
+}
+
 /**
  * The button that moves my PR between draft and ready for review: my drafts
  * become ready, and the ones ready for manual review go back to draft.

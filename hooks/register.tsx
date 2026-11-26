@@ -12,13 +12,17 @@ import {
   applyJira,
   applyMarks,
   collectPrs,
+  conflictMessage,
+  conflictModeOf,
   draftToggle,
   idsOf,
   isRateLimited,
   laneCounts,
   lonelyIssues as workingIssues,
   markReport,
+  newConflicts,
   newlyUrgent,
+  ownerSession,
   parseJiraPage,
   parseSessions,
   pauseNote,
@@ -33,7 +37,7 @@ import {
   summary,
   withDetails,
 } from './model'
-import type { RawDetails, RawIds } from './model'
+import type { ConflictAlerts, RawDetails, RawIds } from './model'
 
 const PANE = 'pr-radar'
 const TITLE = 'PR Radar'
@@ -51,7 +55,11 @@ const foldedTodoAtom = atom({ plugin: 'pr-radar', key: 'foldedTodo' } as const, 
 const clockAtom = atom({ plugin: 'pr-radar', key: 'clock' } as const, 0)
 const paneOpenAtom = atom({ plugin: 'pr-radar', key: 'isPaneOpen' } as const, false)
 
-type Options = { agentContextPath?: string; refreshMinutes?: number }
+type Options = { agentContextPath?: string; refreshMinutes?: number; conflicts?: string }
+
+const CONFLICTS_KEY = 'conflictAlerts'
+/** The most new sessions one refresh starts to resolve conflicts; the others get a toast. */
+const MAX_FIX_SESSIONS = 3
 
 /** GitHub refreshes paused until `until`: the budget is spent, or only low. */
 type Pause = { until: number; isSpent: boolean }
@@ -519,6 +527,86 @@ const setReady = async ($: EngineInterface, options: Options, row: PrRow, isRead
   await refresh($, options, true)
 }
 
+/**
+ * Calls a session tool from a timer, with nobody's press behind it: only when
+ * the permission rules already allow it, so that no dialog pops up on its own.
+ * @returns `sent` when it ran, `needs-permission` when the rules do not allow it, `failed` otherwise.
+ */
+const callUnattended = async (
+  $: EngineInterface,
+  suffix: string,
+  input: Record<string, unknown>,
+): Promise<'sent' | 'needs-permission' | 'failed'> => {
+  const tool = await findTool($, suffix)
+  if (tool === null) return 'failed'
+  const { decision } = await $.tool.check({ tool: tool as `mcp__${string}__${string}`, input }).catch(() => ({ decision: 'ask' }))
+  if (decision !== 'allow') return 'needs-permission'
+  const ran = await $.tool.call({ tool: tool as `mcp__${string}__${string}`, ...input })
+  return ran.deny === undefined && ran.isError !== true ? 'sent' : 'failed'
+}
+
+/**
+ * Reports each of my PRs that newly conflicts with its base, once per
+ * conflict, as the `conflicts` option says: `notify` tells its most recent
+ * linked session, `fix` asks that session to resolve it, or starts a new
+ * session for it when none is linked. Each conflict also gets a toast. The
+ * first refresh only records the conflicts already there.
+ * @param options - The mod's options.
+ * @param snapshot - The refresh's snapshot, read from GitHub just now.
+ * @returns The ids of the PRs reported, whose toast replaces the lane-change one.
+ */
+const reportConflicts = async ($: EngineInterface, options: Options, snapshot: Snapshot): Promise<Set<string>> => {
+  const stored = (await $.store.get(CONFLICTS_KEY)) as ConflictAlerts | undefined
+  const { fresh, alerts } = newConflicts(snapshot.prs, stored ?? {})
+  await $.store.set(CONFLICTS_KEY, alerts)
+  const mode = conflictModeOf(options.conflicts)
+  const reported = new Set<string>()
+  if (stored === undefined || mode === 'off') return reported
+  let started = 0
+  for (const row of fresh) {
+    reported.add(row.id)
+    const name = `${nameOf(row.repo)}#${row.number}`
+    const owner = snapshot.sessionsState === 'ok' ? ownerSession(row, snapshot.sessions) : null
+    if (owner !== null) {
+      const sent = await callUnattended($, 'ccd_session_mgmt__send_message', { session_id: owner.id, message: conflictMessage(row, mode) })
+      if (sent === 'sent' && mode === 'fix') await setMark($, row, true)
+      $.ui.toast(
+        sent === 'sent'
+          ? `${name}: conflicts with ${row.base}, sent to “${owner.title}”`.slice(0, 120)
+          : `${name}: conflicts with ${row.base}${sent === 'needs-permission' ? ' (allow ccd_session_mgmt__send_message to tell its session)' : ''}`,
+        { timeoutMs: 10_000 },
+      )
+      continue
+    }
+    // A new session only when the sessions were read, so that one already linked is never doubled.
+    if (mode === 'fix' && snapshot.sessionsState === 'ok' && started < MAX_FIX_SESSIONS) {
+      const cwd = await checkoutOf($, row.repo)
+      const title = `Resolve ${name}`
+      const ran = await callUnattended($, '__start_session', {
+        initiation: 'user_asked',
+        title,
+        prompt: conflictMessage(row, 'fix'),
+        context: 'fresh',
+        background: `Started by the PR Radar, whose “conflicts” option is set to “fix” by the user: the PR ${row.url} “${row.title}” (branch ${row.branch} into ${row.base}) has new merge conflicts.${row.jiraKey === null ? '' : ` Jira issue ${row.jiraKey}.`}`,
+        ...(cwd === null ? {} : { cwd }),
+      })
+      if (ran === 'sent') {
+        started += 1
+        await setMark($, row, true)
+        $.ui.toast(`${name}: conflicts with ${row.base}, new session: ${title}`, { timeoutMs: 10_000 })
+        continue
+      }
+      $.ui.toast(
+        `${name}: conflicts with ${row.base}${ran === 'needs-permission' ? ' (allow start_session to resolve them on its own)' : ''}`,
+        { timeoutMs: 10_000 },
+      )
+      continue
+    }
+    $.ui.toast(`${name}: conflicts with ${row.base}`, { timeoutMs: 10_000 })
+  }
+  return reported
+}
+
 let isRunning = false
 
 /** What a refresh found: its snapshot, and each source whose permission was refused, with the reason. */
@@ -604,7 +692,12 @@ const refresh = async ($: EngineInterface, options: Options, isAttended: boolean
     await update($, snapshotAtom, () => snapshot)
     await $.store.set(STORE_KEY, snapshot)
     $.ui.status(statusText(snapshot))
-    const urgent = newlyUrgent(before, snapshot)
+    // Conflicts are judged only on PRs GitHub returned just now, not on a kept copy.
+    const reported =
+      !isPaused && github.status === 'fulfilled' && github.value !== null
+        ? await reportConflicts($, options, snapshot).catch(() => new Set<string>())
+        : new Set<string>()
+    const urgent = newlyUrgent(before, snapshot).filter(row => !reported.has(row.id))
     if (urgent.length === 1 && urgent[0] !== undefined) {
       $.ui.toast(`${urgent[0].repo.split('/')[1]}#${urgent[0].number}: ${urgent[0].reason}`, { timeoutMs: 8000 })
     } else if (urgent.length > 1) {

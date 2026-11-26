@@ -6,6 +6,8 @@ import {
   applyMarks,
   classify,
   collectPrs,
+  conflictMessage,
+  conflictModeOf,
   draftToggle,
   idsOf,
   isRateLimited,
@@ -13,7 +15,9 @@ import {
   jiraKeyOf,
   lonelyIssues,
   markReport,
+  newConflicts,
   newlyUrgent,
+  ownerSession,
   parseJiraPage,
   parseSessions,
   pauseNote,
@@ -254,6 +258,36 @@ describe('Jira, sessions and ordering', () => {
     expect(newlyUrgent(null, snapshot([blocked]))).toEqual([])
     expect(actionPrompt(classify(rawPr({ ci: 'FAILURE' }), ME, 'author'))?.label).toBe('Start the review')
     expect(actionPrompt(waiting)?.label).toBe('Resume')
+  })
+})
+
+describe('new conflicts', () => {
+  const mine = (over: Parameters<typeof rawPr>[0]) => classify(rawPr(over), ME, 'author')
+
+  test('only my PRs that newly conflict are reported, once per conflict', () => {
+    const conflicting = mine({ number: 1, mergeable: 'CONFLICTING' })
+    const theirs = classify(rawPr({ number: 2, author: 'bob', mergeable: 'CONFLICTING', requested: [ME] }), ME, 'reviewer')
+    const first = newConflicts([conflicting, theirs, mine({ number: 3 })], {})
+    expect(first.fresh.map(row => row.number)).toEqual([1])
+    expect(first.alerts).toEqual({ 'acme/app#1': conflicting.updatedAt })
+    expect(newConflicts([conflicting], first.alerts).fresh).toEqual([])
+  })
+
+  test('a recomputing PR stays reported; a changed, clean one leaves the list', () => {
+    const alerts = { 'acme/app#1': '2026-10-10T10:00:00Z' }
+    expect(newConflicts([mine({ number: 1, mergeable: 'UNKNOWN' })], alerts).alerts).toEqual(alerts)
+    expect(newConflicts([mine({ number: 1, updatedAt: '2026-10-11T10:00:00Z' })], alerts).alerts).toEqual({})
+    expect(newConflicts([], alerts).alerts).toEqual({})
+  })
+
+  test('the option, the session told and the message', () => {
+    expect([conflictModeOf('fix'), conflictModeOf('off'), conflictModeOf(undefined), conflictModeOf('other')]).toEqual(['fix', 'off', 'notify', 'notify'])
+    const row = mine({ number: 9, title: 'ABC-9 x' })
+    const at = (id: string, when: string) => ({ id, title: id, cwd: 'C:/a', repo: 'acme/app', prNumber: 9, isRunning: false, lastActivityAt: when, link: null })
+    expect(ownerSession(row, [at('old', '2026-10-01T00:00:00Z'), at('new', '2026-10-12T00:00:00Z')])?.id).toBe('new')
+    expect(ownerSession(row, [])).toBeNull()
+    expect(conflictMessage(row, 'fix')).toContain('Resolve them: bring main into ABC-100-fix-widget')
+    expect(conflictMessage(row, 'notify')).toContain('do not resolve them unless I ask')
   })
 })
 

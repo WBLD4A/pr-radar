@@ -62,7 +62,7 @@ A new conversation opens as a desktop session when the app offers one. Otherwise
 
 ## What it does on your machine
 
-A mod runs with your own permissions and is not sandboxed. PR Radar is read-only except for the buttons you press. Everything it does is listed here.
+A mod runs with your own permissions and is not sandboxed. PR Radar is read-only except for the buttons you press and, as the `conflicts` option sets it (`notify` by default), a message to a Claude session or a new session when one of your PRs newly conflicts. Everything it does is listed here.
 
 Processes it starts:
 - `gh api graphql`, `gh api user` and `gh api rate_limit`, to list your pull requests and read your GraphQL budget;
@@ -77,11 +77,11 @@ Files it reads:
 
 Network calls: only GitHub through `gh`, and Jira through the Atlassian connector of your session when you have one. It sends no data anywhere else, and stores its snapshot, marks and lease in the plugin's own store.
 
-Tools of the session it calls: the Atlassian connector's JQL search and site list, and the desktop app's session list, start-session, send-message and Terminal tools. A call that would ask for a permission runs only when you refresh with `/prs refresh` or press **Authorize**.
+Tools of the session it calls: the Atlassian connector's JQL search and site list, and the desktop app's session list, start-session, send-message and Terminal tools. A read that would ask for a permission runs only when you refresh with `/prs refresh` or press **Authorize**. The conflict report's send-message and start-session calls never ask: they run only when your permission rules already allow them, and a conflict whose report could not be sent keeps its toast and is not sent again.
 
 ### Notes for the directory review
 
-- **Tools the mod calls itself** (`callTool` in `hooks/register.tsx`): only the session tools named above, found by these fixed name suffixes: `__searchJiraIssuesUsingJql`, `__getAccessibleAtlassianResources`, `ccd_session_mgmt__list_sessions`, `__start_session`, `ccd_session_mgmt__send_message` and `terminal__run_in_terminal`. The Jira and session-list calls run on each refresh. The other three run only when you press a card's button to start or continue a conversation. The `mark` tool calls none of them; it refreshes the radar only when the session has no snapshot yet. The tool name comes from the session's tool list, which is why it is not written as fixed text; no server answer ever picks a tool or a command.
+- **Tools the mod calls itself** (`callTool` in `hooks/register.tsx`): only the session tools named above, found by these fixed name suffixes: `__searchJiraIssuesUsingJql`, `__getAccessibleAtlassianResources`, `ccd_session_mgmt__list_sessions`, `__start_session`, `ccd_session_mgmt__send_message` and `terminal__run_in_terminal`. The Jira and session-list calls run on each refresh. The other three run when you press a card's button to start or continue a conversation; `send_message` and `start_session` also run on their own when one of your PRs newly conflicts and the `conflicts` option asks for it, and then only when your permission rules already allow them (`callUnattended`). The `mark` tool calls none of them; it refreshes the radar only when the session has no snapshot yet. The tool name comes from the session's tool list, which is why it is not written as fixed text; no server answer ever picks a tool or a command.
 - **The `gh api graphql` command** (`graphql` in `hooks/register.tsx`): the program and its flags are fixed text. The query is a constant built in `hooks/model.ts`, and its `$q1`…`$q4` variables are GitHub search strings made from your login (`author:<login>`, `review-requested:<login>`, and so on); the detail query takes only the pull request ids the first one returned. Only GitHub's answer is read; it is parsed as data and never run.
 - **Environment variables read**: `USERPROFILE` or `HOME`, to find your home folder, and `CLAUDE_CODE_EXECPATH`, to start `claude` in the Terminal fallback. The mod reads no token or key: `gh` uses its own sign-in, and nothing read from the environment is sent anywhere.
 - **Conversation data**: the mod's only `tool.call` hooks are on its own `mcp__pr-radar__snapshot` and `mcp__pr-radar__mark` tools. It answers them in place of a server, as a mod-registered tool does: `snapshot` with the radar's summary, `mark` by setting or removing the radar's own in-progress marks in the plugin's store. It does not see or change any other tool call, and sends no conversation text out.
@@ -95,6 +95,11 @@ Set these in the plugin's config menu. Each option is one row there.
 | --- | --- | --- |
 | `agentContextPath` | empty, meaning `~/agent-context` | The Agent Context checkout whose run records are read. |
 | `refreshMinutes` | `5` | The minutes between two automatic refreshes. Open sessions share one snapshot. |
+| `conflicts` | `notify` | What a new merge conflict on one of your PRs does. `off`: nothing beyond its card. `notify`: a toast, and the PR's most recently active linked Claude session gets a message saying so. `fix`: that session is asked to resolve the conflicts, or, when none is linked, a new session is started for it (at most three per refresh). |
+
+### Conflicts without polling tokens
+
+The automatic refresh is the mod's own code: it reads GitHub with `gh` and spends no model tokens. A Claude session is only messaged, or started, when one of your PRs turns conflicting, once per conflict: a PR stays reported until it changes and no longer conflicts. The first refresh after the update only records the conflicts already there. These calls run from a timer, with no press behind them, so they run only when your permission rules already allow `ccd_session_mgmt__send_message` (and `start_session` for `fix`); otherwise the toast says which tool to allow, and no dialog opens.
 
 ## Turn it off and on
 
