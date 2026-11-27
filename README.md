@@ -97,6 +97,10 @@ Set these in the plugin's config menu. Each option is one row there.
 | `refreshMinutes` | `5` | The minutes between two automatic refreshes. Open sessions share one snapshot. |
 | `conflicts` | `notify` | What a new merge conflict on one of your PRs does. `off`: nothing beyond its card. `notify`: a toast, and the PR's most recently active linked Claude session gets a message saying so. `fix`: that session is asked to resolve the conflicts, or, when none is linked, a new session is started for it (at most three per refresh). |
 
+### Stale e2e evidence
+
+A card shows 🧪 **Evidence e2e périmée** when the latest Playwright evidence comment on the PR's Jira issue tested another commit than the PR's head. The check is the mod's own code and spends no model tokens: the refresh reads the head SHA (`headRefOid`) from GitHub and the issue's comments through the Atlassian connector (read three issues per call, since comments are large), finds the most recent comment headed `Playwright end-to-end results`, reads the SHA of its `Application` line (`branch @ {{sha}}`) and compares it with the head. Without a Jira key, a Jira connector, or an evidence comment, the card shows nothing. Any new commit counts, including a merge of the base branch. Only the `Application` line is compared, so evidence of a PR in the e2e repository itself is not checked against its `E2E suite` line.
+
 ### Conflicts without polling tokens
 
 The automatic refresh is the mod's own code: it reads GitHub with `gh` and spends no model tokens. A Claude session is only messaged, or started, when one of your PRs turns conflicting, once per conflict: a PR stays reported until it changes and no longer conflicts. The first refresh after the update only records the conflicts already there. These calls run from a timer, with no press behind them, so they run only when your permission rules already allow `ccd_session_mgmt__send_message` (and `start_session` for `fix`); otherwise the toast says which tool to allow, and no dialog opens.

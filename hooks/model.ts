@@ -20,7 +20,7 @@ export const DETAIL_QUERY = `query($ids:[ID!]!){
   nodes(ids:$ids){...P}
 }
 fragment P on PullRequest{
-  id number title url isDraft createdAt updatedAt headRefName baseRefName
+  id number title url isDraft createdAt updatedAt headRefName headRefOid baseRefName
   additions deletions
   repository{nameWithOwner}
   author{login}
@@ -56,6 +56,7 @@ export type RawPr = {
   createdAt: string
   updatedAt: string
   headRefName: string
+  headRefOid?: string
   baseRefName: string
   additions: number
   deletions: number
@@ -260,6 +261,7 @@ export const classify = (raw: RawPr, me: string, role: Role): PrRow => {
     changesRequestedBy,
     labels,
     branch: raw.headRefName,
+    headSha: raw.headRefOid ?? '',
     base: raw.baseRefName,
     additions: raw.additions,
     deletions: raw.deletions,
@@ -451,6 +453,52 @@ export const markReport = (targets: MarkTarget[], rows: PrRow[], isOn: boolean):
   return [`PR Radar: ${verb}; a mark lasts until the PR next changes on GitHub.`, ...lines].join('\n')
 }
 
+/** All the text of a Jira comment body: wiki markup as is, Atlassian document format flattened node by node. */
+const textOfBody = (body: unknown): string => {
+  if (typeof body === 'string') return body
+  if (body === null || typeof body !== 'object') return ''
+  const node = body as { text?: unknown; content?: unknown }
+  const own = typeof node.text === 'string' ? [node.text] : []
+  const inner = Array.isArray(node.content) ? node.content.map(textOfBody) : []
+  return [...own, ...inner].join(' ')
+}
+
+const EVIDENCE_TITLE = /Playwright end-to-end results/i
+
+/**
+ * The application commit the latest e2e evidence comment of an issue tested:
+ * the first characters of the SHA on its `Application` line (`branch @ {{sha}}`).
+ * Only the most recent evidence comment counts, as in the publisher's own
+ * replace-the-latest rule.
+ * @param comments - The issue's `comment` field, as the connector returns it.
+ * @returns The SHA as written in the comment, or undefined when no evidence comment names one.
+ */
+export const evidenceShaOf = (comments: unknown): string | undefined => {
+  const list = (comments as { comments?: unknown } | null | undefined)?.comments
+  if (!Array.isArray(list)) return undefined
+  const dated = list
+    .map((comment: { body?: unknown; created?: unknown }, index) => ({
+      text: textOfBody(comment.body),
+      at: typeof comment.created === 'string' ? Date.parse(comment.created) : Number.NaN,
+      index,
+    }))
+    .filter(comment => EVIDENCE_TITLE.test(comment.text))
+    .sort((a, b) => (Number.isNaN(a.at) || Number.isNaN(b.at) ? b.index - a.index : b.at - a.at))
+  const latest = dated[0]
+  if (latest === undefined) return undefined
+  return /Application[^@]*@\s*\{*([0-9a-f]{7,40})/i.exec(latest.text)?.[1]?.toLowerCase()
+}
+
+/**
+ * Whether the latest e2e evidence of the PR's Jira issue tested another commit
+ * than the PR's head. False when there is no evidence or no head to compare.
+ */
+export const isEvidenceStale = (row: PrRow, jira: Record<string, JiraInfo>): boolean => {
+  const sha = row.jiraKey === null ? undefined : jira[row.jiraKey]?.evidenceSha
+  const head = row.headSha?.toLowerCase() ?? ''
+  return sha !== undefined && head !== '' && !head.startsWith(sha)
+}
+
 type JiraIssue = { key: string; fields?: Record<string, unknown> }
 
 type JiraIssues = JiraIssue[] | { nodes?: JiraIssue[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } }
@@ -484,8 +532,11 @@ export const parseJiraPage = (text: string): { issues: JiraInfo[]; next: string 
       priority?: { name?: string } | null
       assignee?: { displayName?: string } | null
       issuetype?: { name?: string }
+      comment?: unknown
     }
+    const evidenceSha = evidenceShaOf(f.comment)
     return {
+      ...(evidenceSha === undefined ? {} : { evidenceSha }),
       key: issue.key,
       summary: f.summary ?? '',
       status: f.status?.name ?? '?',

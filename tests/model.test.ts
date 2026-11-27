@@ -3,6 +3,8 @@ import { describe, expect, test } from 'claude-code/testing'
 import {
   actionPrompt,
   applyJira,
+  evidenceShaOf,
+  isEvidenceStale,
   applyMarks,
   classify,
   collectPrs,
@@ -197,6 +199,47 @@ describe('Jira, sessions and ordering', () => {
     }
     expect(parseJiraPage(JSON.stringify({ issues: { nodes: [] } })).issues).toEqual([])
     expect(parseJiraPage(JSON.stringify({})).issues).toEqual([])
+  })
+
+  test('the latest e2e evidence comment names the tested commit, and a different head makes it stale', () => {
+    const wiki = (sha: string) =>
+      `h3. Playwright end-to-end results — Widget\n\n||Application|ABC-100-fix-widget @ {{${sha}}}|\n||E2E suite|suite @ {{1111111111}}|`
+    const adf = (sha: string) => ({
+      type: 'doc',
+      content: [
+        { type: 'heading', content: [{ type: 'text', text: 'Playwright end-to-end results — Widget' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Application' }, { type: 'text', text: 'ABC-100-fix-widget @ ' }, { type: 'text', text: sha }] },
+      ],
+    })
+    expect(evidenceShaOf({ comments: [{ body: wiki('abcdef0123'), created: '2026-11-01T10:00:00Z' }] })).toBe('abcdef0123')
+    expect(evidenceShaOf({ comments: [{ body: adf('ABCDEF0123'), created: '2026-11-01T10:00:00Z' }] })).toBe('abcdef0123')
+    // Only the most recent evidence comment counts; other comments are ignored.
+    expect(
+      evidenceShaOf({
+        comments: [
+          { body: wiki('2222222222'), created: '2026-11-03T10:00:00Z' },
+          { body: wiki('1111111111'), created: '2026-11-01T10:00:00Z' },
+          { body: 'LGTM @ {{3333333333}}', created: '2026-11-04T10:00:00Z' },
+        ],
+      }),
+    ).toBe('2222222222')
+    expect(evidenceShaOf({ comments: [{ body: 'no evidence here' }] })).toBeUndefined()
+    expect(evidenceShaOf(undefined)).toBeUndefined()
+
+    const info = (evidenceSha?: string) => ({
+      'ABC-100': { key: 'ABC-100', summary: '', status: 'In Review', category: null, priority: null, assignee: null, type: null, ...(evidenceSha === undefined ? {} : { evidenceSha }) },
+    })
+    const row = classify(rawPr({ headRefOid: 'abcdef0123456789abcdef0123456789abcdef01' }), ME, 'author')
+    expect(row.headSha).toBe('abcdef0123456789abcdef0123456789abcdef01')
+    expect(isEvidenceStale(row, info('abcdef0123'))).toBe(false)
+    expect(isEvidenceStale(row, info('9999999999'))).toBe(true)
+    expect(isEvidenceStale(row, info())).toBe(false)
+    expect(isEvidenceStale({ ...row, jiraKey: null }, info('9999999999'))).toBe(false)
+    expect(isEvidenceStale({ ...row, headSha: '' }, info('9999999999'))).toBe(false)
+    const parsed = parseJiraPage(
+      JSON.stringify({ issues: [{ key: 'ABC-100', fields: { comment: { comments: [{ body: wiki('9999999999'), created: '2026-11-01T10:00:00Z' }] } } }] }),
+    )
+    expect(parsed.issues[0]?.evidenceSha).toBe('9999999999')
   })
 
   test('the next Jira page comes from the cursor of the nodes or the token of the list', () => {

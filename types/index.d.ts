@@ -17,6 +17,8 @@ export type JiraInfo = {
   priority: string | null
   assignee: string | null
   type: string | null
+  /** The commit the latest e2e evidence comment tested, as written there; absent without evidence. */
+  evidenceSha?: string
 }
 
 /** One open Claude desktop session. */
@@ -69,6 +71,8 @@ export type PrRow = {
   changesRequestedBy: string[]
   labels: string[]
   branch: string
+  /** The head commit's full SHA; empty when GitHub did not give it. */
+  headSha: string
   base: string
   additions: number
   deletions: number

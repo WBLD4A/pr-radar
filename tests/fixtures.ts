@@ -25,6 +25,7 @@ export const rawPr = (
     createdAt: over.createdAt ?? '2026-10-01T10:00:00Z',
     updatedAt: over.updatedAt ?? '2026-10-10T10:00:00Z',
     headRefName: over.headRefName ?? 'ABC-100-fix-widget',
+    headRefOid: over.headRefOid ?? 'abcdef0123456789abcdef0123456789abcdef01',
     baseRefName: over.baseRefName ?? 'main',
     additions: over.additions ?? 10,
     deletions: over.deletions ?? 2,

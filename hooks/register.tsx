@@ -16,6 +16,7 @@ import {
   conflictModeOf,
   draftToggle,
   idsOf,
+  isEvidenceStale,
   isRateLimited,
   laneCounts,
   lonelyIssues as workingIssues,
@@ -41,7 +42,7 @@ import type { ConflictAlerts, RawDetails, RawIds } from './model'
 
 const PANE = 'pr-radar'
 const TITLE = 'PR Radar'
-const STORE_KEY = 'snapshot-v5'
+const STORE_KEY = 'snapshot-v6'
 const TICK_MS = 60_000
 const PAUSE_KEY = 'githubPause'
 const LEASE_KEY = 'refreshLease'
@@ -229,6 +230,12 @@ type JiraResult = {
 
 const JIRA_FIELDS = ['summary', 'status', 'priority', 'assignee', 'issuetype']
 
+/** The PRs' issues also carry their comments, where the latest e2e evidence names the commit it tested. */
+const JIRA_PR_FIELDS = [...JIRA_FIELDS, 'comment']
+
+/** Issues per call when comments come along: they weigh far more than the other fields. */
+const JIRA_COMMENT_PAGE = 3
+
 /** What the pane says when the Atlassian connector's answer cannot be read. */
 const JIRA_UNREADABLE = "the Atlassian connector's answer could not be read"
 
@@ -256,11 +263,12 @@ const searchJira = async (
   input: Record<string, unknown>,
   limit: number,
   asked: Asked,
+  pageSize: number = JIRA_PAGE,
 ): Promise<{ issues: JiraInfo[] } | { state: SourceState; reason: string }> => {
   const issues: JiraInfo[] = []
   let token: string | null = null
   do {
-    const page = { ...input, maxResults: Math.min(JIRA_PAGE, limit - issues.length), ...(token === null ? {} : { nextPageToken: token }) }
+    const page = { ...input, maxResults: Math.min(pageSize, limit - issues.length), ...(token === null ? {} : { nextPageToken: token }) }
     const got = await callTool($, search, page, asked)
     if (!('text' in got)) return got
     const read = parseJiraPage(got.text)
@@ -295,7 +303,7 @@ const fetchJira = async ($: EngineInterface, keys: string[], asked: Asked): Prom
   }
   const jira: Record<string, JiraInfo> = {}
   if (keys.length > 0) {
-    const got = await searchJira($, search, { cloudId: site.cloudId, jql: `key in (${keys.join(', ')})`, fields: JIRA_FIELDS }, 100, asked)
+    const got = await searchJira($, search, { cloudId: site.cloudId, jql: `key in (${keys.join(', ')})`, fields: JIRA_PR_FIELDS }, 100, asked, JIRA_COMMENT_PAGE)
     if (!('issues' in got)) return { ...empty, site: site.url, state: got.state, error: got.reason }
     for (const issue of got.issues) jira[issue.key] = issue
   }
@@ -1009,6 +1017,7 @@ export const register: Register = (on, rawOptions) => {
       if (row.ci === 'success' && !isMuted) signals.push(<Text color="success">✔</Text>)
       if (row.hasConflicts) signals.push(<Text color={isMuted ? 'inactive' : 'error'}>⚡</Text>)
       if (row.openThreads > 0) signals.push(<Text color={isMuted ? 'inactive' : 'warning'}>💬{row.openThreads}</Text>)
+      if (isEvidenceStale(row, snapshot.jira)) signals.push(<Text color={isMuted ? 'inactive' : 'warning'}>🧪 Evidence e2e périmée</Text>)
       if (mark !== null) signals.push(<Text color={isMuted ? 'inactive' : mark.color}>{mark.glyph}</Text>)
       return (
         <Box key={row.id} flexDirection="column" borderStyle="round" borderColor={color} borderDimColor={isMuted} paddingX={1}>
